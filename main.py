@@ -9,7 +9,7 @@ from pathlib import Path
 # ==========================================
 ENABLE_REGISTRATION = True
 ENABLE_MINUTES = False   # 議事録
-# ENABLE_BILLING = False   # 会計
+ENABLE_BILLING = False   # 会計
 ENABLE_SEARCH = True
 
 # ==========================================
