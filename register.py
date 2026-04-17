@@ -4,7 +4,7 @@ from pathlib import Path
 from datetime import datetime
 
 # ==========================================
-# JSON 読み書き
+# いつものあれ jsonファイル
 # ==========================================
 def load_data(json_file):
     if not json_file.exists() or json_file.stat().st_size == 0:
@@ -47,8 +47,8 @@ def collect_existing_tags(data_folder):
 def show_registration():
     st.title("登録")
 
-    # メインサーバー/保存先設定の取得
-    data_dir_path = st.session_state.get("data_dir", r"C:\Users\user\Desktop\data")
+    # メインサーバー/保存先設定
+    data_dir_path = st.session_state.get("data_dir", r"C:\Users\user\Desktop\webapp_env\data")
     data_dir = Path(data_dir_path)
     image_dir = data_dir / "images"
     json_file = data_dir / "mobile_records.json"
@@ -61,8 +61,10 @@ def show_registration():
         return
 
     # 入力フォーム
-    uploaded_file = st.file_uploader("ファイルのアップロード", type=["jpg", "jpeg", "png", "pdf", "csv", "xlsx"])
+    uploaded_files = st.file_uploader("ファイルのアップロード", type=["jpg", "jpeg", "png", "pdf", "csv", "xlsx","txt","bat", "url"],
+    accept_multiple_files=True)
     title = st.text_input("タイトル")
+    url_input = st.text_input("参考URL (http～)")
     content = st.text_area("内容")
 
     # ==========================================
@@ -104,27 +106,29 @@ def show_registration():
         tags = list(dict.fromkeys(selected_tags + new_tags))
 
         # ==========================================
-        # ファイルの保存
+        # 画像等ファイル保存
         # ==========================================
-        file_path_str = ""
-        if uploaded_file:
-            timestamp_str = datetime.now().strftime("%Y%m%d%H%M%S")
-            ext = Path(uploaded_file.name).suffix
+        file_paths = []
+        if uploaded_files:
+            for i, uploaded_file in enumerate(uploaded_files):
+                timestamp_str = datetime.now().strftime("%Y%m%d%H%M%S")
+                ext = Path(uploaded_file.name).suffix
 
-            # 安全なファイル名を作成
-            safe_title = title.replace("\\", "_").replace("/", "_").replace(":", "_").replace("*", "_")
-            safe_title = safe_title.replace("?", "_").replace("\"", "_").replace("<", "_").replace(">", "_").replace("|", "_")
-            filename = f"{timestamp_str}_{safe_title}{ext}"
+                # 安全なファイル名を作成
+                safe_title = title.replace("\\", "_").replace("/", "_").replace(":", "_").replace("*", "_")
+                safe_title = safe_title.replace("?", "_").replace("\"", "_").replace("<", "_").replace(">", "_").replace("|", "_")
+                # 複数ファイルある場合はインデックスを付ける
+                filename = f"{timestamp_str}_{safe_title}_{i}{ext}"
 
-            image_path = image_dir / filename
+                image_path = image_dir / filename
 
-            try:
-                with image_path.open("wb") as f:
-                    f.write(uploaded_file.getbuffer())
-                file_path_str = str(image_path).replace("\\", "/")
-            except Exception as e:
-                st.error(f"ファイルの保存時にエラーが発生しました: {e}")
-                return
+                try:
+                    with image_path.open("wb") as f:
+                        f.write(uploaded_file.getbuffer())
+                    file_paths.append(str(image_path).replace("\\", "/"))
+                except Exception as e:
+                    st.error(f"ファイルの保存時にエラーが発生しました ({uploaded_file.name}): {e}")
+                    # 一部失敗しても続行するか検討が必要だが、ここでは一旦エラー表示
 
         # ==========================================
         # データ（JSON）保存
@@ -136,9 +140,10 @@ def show_registration():
 
         entry = {
             "title": title,
+            "url": url_input,
             "text": content,
             "tags": tags,
-            "file_path": file_path_str,
+            "file_path": file_paths, # リストとして保存
             "date": date_str,
             "time": time_str,
             "created_at": timestamp
@@ -150,11 +155,11 @@ def show_registration():
             save_data(json_file, data)
 
             st.success("正常に登録されました！")
-            if file_path_str:
-                if file_path_str.lower().endswith((".png", ".jpg", ".jpeg", ".gif")):
-                    st.image(file_path_str, caption="アップロードされたファイル", use_column_width=True)
-                else:
-                    st.info(f"ファイルを保存しました: {filename}")
+            if file_paths:
+                st.info(f"{len(file_paths)}件のファイルを保存しました。")
+                for path in file_paths:
+                    if path.lower().endswith((".png", ".jpg", ".jpeg", ".gif")):
+                        st.image(path, caption=Path(path).name, width=300)
 
         except Exception as e:
             st.error(f"データの保存時にエラーが発生しました: {e}")
