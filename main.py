@@ -57,7 +57,6 @@ print_qr_to_console()
 # ==========================================
 ENABLE_REGISTRATION = True
 ENABLE_MINUTES = False   # 議事録
-ENABLE_BILLING = False   # 会計
 ENABLE_SEARCH = True
 
 # ==========================================
@@ -92,12 +91,10 @@ st.sidebar.title("メニュー")
 menu_options = []
 if ENABLE_REGISTRATION: menu_options.append("登録")
 if ENABLE_MINUTES:      menu_options.append("議事録作成")
-if ENABLE_BILLING:      menu_options.append("会計")
 if ENABLE_SEARCH:       menu_options.append("検索")
     
 menu = st.sidebar.radio(
     "機能を選択",
-    ["登録", "検索"]
     menu_options
 )
 
