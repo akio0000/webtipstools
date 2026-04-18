@@ -3,6 +3,54 @@ from register import show_registration
 from search import show_search
 from minutes import show_minutes_registration
 from pathlib import Path
+import qrcode
+import socket
+import os
+
+# ==========================================
+# 起動時にコンソールへQRコードを表示する機能
+# ==========================================
+@st.cache_resource
+def print_qr_to_console():
+    """
+    ネットワークIPを取得し、コンソールにQRコードをアスキーアートで表示する。
+    st.cache_resource を使うことで、アプリ起動時の1回だけ実行されるようにします。
+    """
+    def get_local_ip():
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            # 外部に接続しに行かなくても、接続を試みるだけで自分のIPがわかる
+            s.connect(('8.8.8.8', 80))
+            ip = s.getsockname()[0]
+        except Exception:
+            ip = '127.0.0.1'
+        finally:
+            s.close()
+        return ip
+
+    local_ip = get_local_ip()
+    port = 8501  # デフォルトポート。変更している場合はここを調整
+    url = f"http://{local_ip}:{port}"
+
+    # コンソールへの出力
+    print("\n" + "█"*50 )
+    print(f" Tipstools Web Server Started!")
+    print(f" Network URL: {url}")
+    print("█" * 50 + "\n")
+    
+    try:
+        qr = qrcode.QRCode()
+        qr.add_data(url)
+        # コンソール用にアスキーアートで出力
+        # invert=True にすることで、黒背景のコンソールで正しく読み取れるようになります
+        qr.print_ascii(invert=True)
+        print("\n" + "█"*50 + "\n")
+    except Exception as e:
+        print(f"QRコードの生成に失敗しました: {e}")
+
+# 起動時に実行
+print_qr_to_console()
+
 
 # ==========================================
 # フラグ（ON/OFF　追加していく）
