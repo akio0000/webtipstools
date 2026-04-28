@@ -2,14 +2,15 @@ import streamlit as st
 import json
 from pathlib import Path
 from datetime import datetime
-from register import load_data, save_data, collect_existing_tags
+from utils import collect_existing_tags, collect_existing_participants, save_record_to_db
+from config import DEFAULT_DATA_DIR
 
 def show_minutes_registration():
     st.title("議事録の作成")
     st.markdown("会議の内容を入力して保存します。")
 
     # 保存先設定
-    data_dir_path = st.session_state.get("data_dir", r"C:\Users\user\Desktop\webapp_env\data")
+    data_dir_path = st.session_state.get("data_dir", DEFAULT_DATA_DIR)
     data_dir = Path(data_dir_path)
     image_dir = data_dir / "images"
     json_file = data_dir / "minutes_records.json"
@@ -29,15 +30,28 @@ def show_minutes_registration():
     st.divider()
     
     # 日時
-    col_d, col_t = st.columns(2)
+    col_d, col_ts, col_te = st.columns([2, 1, 1])
     with col_d:
         d = st.date_input("日付", value=datetime.now())
-    with col_t:
-        t = st.time_input("開始時間", value=datetime.now())
+    with col_ts:
+        t_start = st.time_input("開始時間", value=datetime.now())
+    with col_te:
+        # デフォルトで1時間後を設定
+        default_end = (datetime.combine(datetime.today(), t_start) + (datetime.min - datetime.min)).time() # dummy for alignment
+        t_end = st.time_input("終了時間", value=(datetime.now()))
     
-    # 各項目
     location = st.text_input("場所", placeholder="会議室A、オンライン等")
-    participants = st.text_area("参加者", placeholder="出席者氏名、部署名など")
+
+    existing_participants = collect_existing_participants()
+    st.markdown("**参加者**")
+    selected_participants = st.multiselect("既存の参加者から選択", options=existing_participants)
+    new_participants_input = st.text_input("新しい参加者を追加（カンマ区切り）", placeholder="田中 太郎, 佐藤 次郎")
+    
+    # 参加者リストの統合
+    p_processed = new_participants_input.strip().replace("　", ",").replace(" ", ",").replace("、", ",").replace("，", ",")
+    new_p_list = [p.strip() for p in p_processed.split(",") if p.strip()]
+    participants_list = list(dict.fromkeys(selected_participants + new_p_list))
+    participants_text = ", ".join(participants_list)
     agenda = st.text_area("議題", placeholder="1. ○○について\n2. △△の進捗", height=100)
     content = st.text_area("内容（詳細）", height=250)
     remarks = st.text_area("備考", height=100)
@@ -49,7 +63,7 @@ def show_minutes_registration():
     # タグ・ファイル
     # ==========================================
     st.divider()
-    existing_tags = collect_existing_tags(data_dir)
+    existing_tags = collect_existing_tags()
     st.markdown("**タグ**")
     selected_tags = st.multiselect("既存タグから選択", options=existing_tags, default=[t for t in ["議事録"] if t in existing_tags])
     new_tags_input = st.text_input("新しいタグを追加", value="" if "議事録" in (existing_tags + selected_tags) else "議事録")
@@ -65,9 +79,9 @@ def show_minutes_registration():
 
         # フィールドの整理
         fields = {
-            "日時": f"{d} {t.strftime('%H:%M')}",
+            "日時": f"{d} {t_start.strftime('%H:%M')} ～ {t_end.strftime('%H:%M')}",
             "場所": location,
-            "参加者": participants,
+            "参加者": participants_text,
             "議題": agenda,
             "内容": content,
             "備考": remarks,
@@ -93,33 +107,28 @@ def show_minutes_registration():
         # ファイル保存
         file_paths = []
         if uploaded_files:
+            # 安全なファイル名用にタイトルをクリーンアップ
+            safe_title = title.replace("\\", "_").replace("/", "_").replace(":", "_").replace("*", "_")
+            safe_title = safe_title.replace("?", "_").replace("\"", "_").replace("<", "_").replace(">", "_").replace("|", "_")
+            safe_title = safe_title.replace(" ", "_").replace("　", "_").replace("、", "_").replace("，", "_")
+            
             for i, uploaded_file in enumerate(uploaded_files):
                 timestamp_str = datetime.now().strftime("%Y%m%d%H%M%S")
-                filename = f"{timestamp_str}_{i}_{uploaded_file.name}"
+                ext = Path(uploaded_file.name).suffix
+                filename = f"{timestamp_str}_{safe_title}_{i}{ext}"
                 image_path = image_dir / filename
                 try:
                     with image_path.open("wb") as f: f.write(uploaded_file.getbuffer())
                     file_paths.append(str(image_path).replace("\\", "/"))
                 except: st.error(f"保存失敗: {uploaded_file.name}")
 
-        # JSON保存
-        now = datetime.now()
-        entry = {
-            "title": title,
-            "url": url_input,
-            "text": full_text,
-            "details": structured_data,
-            "tags": tags,
-            "file_path": file_paths,
-            "date": now.strftime("%Y-%m-%d"),
-            "time": now.strftime("%H:%M"),
-            "created_at": now.strftime("%Y-%m-%d %H:%M:%S")
-        }
-
+        # DB保存
+        entry["source"] = "minutes"
         try:
-            data = load_data(json_file)
-            data.append(entry)
-            save_data(json_file, data)
-            st.success(f"議事録（{json_file.name}）を正常に保存しました！")
+            if save_record_to_db(entry):
+                st.success(f"議事録「{title}」をデータベースに保存しました！")
+                st.balloons()
+            else:
+                st.error("データベースへの保存に失敗しました。")
         except Exception as e:
             st.error(f"エラーが発生しました: {e}")
