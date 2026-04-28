@@ -41,7 +41,7 @@
 
 ```python
 # データ保存先（共有フォルダ等）
-DEFAULT_DATA_DIR = r"\\3DPRINTERPC\F_save-data\records"
+DEFAULT_DATA_DIR = r"\\network-server\save-data\records"
 
 # AI接続先
 AI_BASE_URL = "http://localhost:1234/v1"
