@@ -1,0 +1,9 @@
+streamlit
+pandas
+openpyxl
+python-docx
+fpdf2
+qrcode
+openai
+requests
+Pillow
