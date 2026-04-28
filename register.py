@@ -2,53 +2,19 @@ import streamlit as st
 import json
 from pathlib import Path
 from datetime import datetime
+from config import DEFAULT_DATA_DIR
+from ai_utils import analyze_image
 
-# ==========================================
-# いつものあれ jsonファイル
-# ==========================================
-def load_data(json_file):
-    if not json_file.exists() or json_file.stat().st_size == 0:
-        return []
-    try:
-        with json_file.open("r", encoding="utf-8") as f:
-            return json.load(f)
-    except:
-        return []
-
-def save_data(json_file, data):
-    with json_file.open("w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-# ==========================================
-# 既存タグの収集（サジェスト用）
-# ==========================================
-def collect_existing_tags(data_folder):
-    """データフォルダ内の全JSONから使用済みタグを集める"""
-    all_tags = set()
-    if not data_folder.exists():
-        return sorted(all_tags)
-
-    for json_file in data_folder.glob("*.json"):
-        try:
-            with json_file.open("r", encoding="utf-8") as f:
-                data = json.load(f)
-                for entry in data:
-                    for tag in entry.get("tags", []):
-                        if tag.strip():
-                            all_tags.add(tag.strip())
-        except:
-            pass
-
-    return sorted(all_tags)
+from utils import collect_existing_tags, compress_video, save_record_to_db
 
 # ==========================================
 # Streamlit UI
 # ==========================================
 def show_registration():
-    st.title("登録")
+    st.title("記録の登録")
 
-    # メインサーバー/保存先設定
-    data_dir_path = st.session_state.get("data_dir", r"C:\Users\user\Desktop\webapp_env\data")
+    # メインサーバー/保存先設定の取得
+    data_dir_path = st.session_state.get("data_dir", DEFAULT_DATA_DIR)
     data_dir = Path(data_dir_path)
     image_dir = data_dir / "images"
     json_file = data_dir / "mobile_records.json"
@@ -61,11 +27,19 @@ def show_registration():
         return
 
     # 入力フォーム
-    uploaded_files = st.file_uploader("ファイルのアップロード", type=["jpg", "jpeg", "png", "pdf", "csv", "xlsx","txt","bat", "url"],
+    uploaded_files = st.file_uploader("ファイルのアップロード", type=["jpg", "jpeg", "png", "pdf", "csv", "xlsx","txt","bat", "url", "mp4", "mov", "avi", "mkv"],
     accept_multiple_files=True)
     title = st.text_input("タイトル")
     url_input = st.text_input("参考URL (http～)")
     content = st.text_area("内容")
+    
+    # セッションでAIが有効な場合のみ解析オプションを表示
+    if st.session_state.get("enable_ai", True):
+        enable_ai_analysis = st.checkbox("AIで画像の内容を自動解析する", value=True)
+    else:
+        enable_ai_analysis = False
+        
+    enable_video_compression = st.checkbox("動画を最適化（リサイズ・圧縮）する", value=True, help="動画のサイズを縮小し、再生互換性を高めます（処理に時間がかかる場合があります）")
 
     # ==========================================
     # タグ入力（サジェスト機能付き）
@@ -114,21 +88,72 @@ def show_registration():
                 timestamp_str = datetime.now().strftime("%Y%m%d%H%M%S")
                 ext = Path(uploaded_file.name).suffix
 
-                # 安全なファイル名を作成
+                # 安全なファイル名を作成（スペースや全角スペースも置換）
                 safe_title = title.replace("\\", "_").replace("/", "_").replace(":", "_").replace("*", "_")
                 safe_title = safe_title.replace("?", "_").replace("\"", "_").replace("<", "_").replace(">", "_").replace("|", "_")
+                safe_title = safe_title.replace(" ", "_").replace("　", "_").replace("、", "_").replace("，", "_")
                 # 複数ファイルある場合はインデックスを付ける
                 filename = f"{timestamp_str}_{safe_title}_{i}{ext}"
 
                 image_path = image_dir / filename
 
                 try:
-                    with image_path.open("wb") as f:
-                        f.write(uploaded_file.getbuffer())
+                    # 動画圧縮の判定
+                    is_video = ext.lower() in [".mp4", ".mov", ".avi", ".mkv"]
+                    
+                    if is_video and enable_video_compression:
+                        with st.spinner(f"動画を圧縮中: {uploaded_file.name}..."):
+                            # 一時ファイルとして一旦保存
+                            temp_path = image_dir / f"temp_{filename}"
+                            with temp_path.open("wb") as f:
+                                f.write(uploaded_file.getbuffer())
+                            
+                            # 出力ファイル名は拡張子を .mp4 に統一（互換性のため）
+                            if ext.lower() != ".mp4":
+                                filename = filename.rsplit(".", 1)[0] + ".mp4"
+                                image_path = image_dir / filename
+
+                            success, err_msg = compress_video(temp_path, image_path)
+                            
+                            # 一時ファイルを削除
+                            if temp_path.exists():
+                                temp_path.unlink()
+                            
+                            if not success:
+                                st.error(f"動画の圧縮に失敗しました。元のファイル形式で保存します。 Error: {err_msg}")
+                                with image_path.open("wb") as f:
+                                    f.write(uploaded_file.getbuffer())
+                    else:
+                        with image_path.open("wb") as f:
+                            f.write(uploaded_file.getbuffer())
+                    
                     file_paths.append(str(image_path).replace("\\", "/"))
                 except Exception as e:
                     st.error(f"ファイルの保存時にエラーが発生しました ({uploaded_file.name}): {e}")
                     # 一部失敗しても続行するか検討が必要だが、ここでは一旦エラー表示
+            
+        # --- AIによる画像解析 ---
+        if enable_ai_analysis and file_paths:
+            with st.status("AIが画像を解析中...") as status:
+                analysis_results = []
+                for path in file_paths:
+                    # 画像ファイルのみ解析対象
+                    if path.lower().endswith((".png", ".jpg", ".jpeg", ".gif")):
+                        st.write(f"解析中: {Path(path).name}...")
+                        result = analyze_image(path)
+                        analysis_results.append(f"【画像解析結果: {Path(path).name}】\n{result}")
+                
+                if analysis_results:
+                    ai_summary = "\n\n".join(analysis_results)
+                    content = content + "\n\n" + ai_summary
+                    status.update(label="画像解析完了！", state="complete")
+                else:
+                    status.update(label="画像解析対象がありませんでした", state="complete")
+            
+            # --- 解析結果をステータス枠の外に表示 ---
+            if 'ai_summary' in locals() and ai_summary:
+                st.info("🤖 **AIによる画像解析結果:**")
+                st.markdown(ai_summary)
 
         # ==========================================
         # データ（JSON）保存
@@ -150,16 +175,25 @@ def show_registration():
         }
 
         try:
-            data = load_data(json_file)
-            data.append(entry)
-            save_data(json_file, data)
+            entry["source"] = "mobile" # 明示的に指定
+            if save_record_to_db(entry):
+                st.success("正常にデータベースへ登録されました！")
+                st.balloons()
+                
+                # --- おまじない(後片付け) ---
+                if st.button("続けて別の記録を登録する"):
+                    st.rerun()
 
-            st.success("正常に登録されました！")
-            if file_paths:
-                st.info(f"{len(file_paths)}件のファイルを保存しました。")
-                for path in file_paths:
-                    if path.lower().endswith((".png", ".jpg", ".jpeg", ".gif")):
-                        st.image(path, caption=Path(path).name, width=300)
+                if file_paths:
+                    st.divider()
+                    st.info(f"{len(file_paths)}件のファイルを保存しました。")
+                    for path in file_paths:
+                        st.write(Path(path).name)
+                        # 画像プレビュー
+                        if path.lower().endswith((".png", ".jpg", ".jpeg", ".gif")):
+                            st.image(path, caption=Path(path).name, width=300)
+            else:
+                st.error("データベースへの保存に失敗しました。")
 
         except Exception as e:
             st.error(f"データの保存時にエラーが発生しました: {e}")
