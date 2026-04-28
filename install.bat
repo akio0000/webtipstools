@@ -4,7 +4,7 @@ cd webtipstools
 python -m venv venv
 call venv\scripts\activate
 python -m pip install --upgrade pip
-pip install streamlit
+pip install streamlit pandas openai Pillow openpyxl python-docx fpdf2 qrcode
 
 echo @echo off > run.bat
 echo cd /d %%~dp0 >> run.bat
